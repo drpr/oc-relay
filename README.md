@@ -190,40 +190,59 @@ desktop and desktop-to-client payloads are relayed in real time.
 The desktop side establishes a local WebSocket connection to opencode's
 terminal/PTY endpoint and bridges data bidirectionally through the tunnel.
 
-## V2 binary frame protocol
+## Tunnel protocol
 
-The relay supports two tunnel protocols:
+The relay ↔ desktop tunnel carries two categories of traffic over a single
+WebSocket connection, each with its own message format:
 
-### V1 (legacy, JSON + base64)
+### HTTP request/response (V2 binary frames)
 
-All messages are JSON text frames. Binary data is base64-encoded.
-
-```
-relay → desktop: { type:'req', id, method, path, headers, body? }
-desktop → relay: { type:'res', id, status, headers }
-                  { type:'chunk', id, data }    (multiple)
-                  { type:'end', id }
-```
-
-### V2 (binary frames, no base64)
-
-Metadata uses JSON text frames; binary data uses WebSocket binary frames.
+Used for all proxied HTTP traffic (GET, HEAD, POST, PUT, PATCH, DELETE).
+Metadata is sent as JSON text frames; request/response bodies are sent as
+WebSocket binary frames (no base64 overhead).
 
 ```
 relay → desktop (text):   { t:1, id, method, path, headers }   request start
-relay → desktop (binary): [idLen:2B BE][id][raw body bytes]     request body chunk
+relay → desktop (binary): [idLen:2B BE][id][raw body bytes]     request body chunk (0+)
 relay → desktop (text):   { t:2, id }                            request body end
 
 desktop → relay (text):   { t:3, id, status, headers }          response headers
-desktop → relay (binary): [idLen:2B BE][id][raw body bytes]     response body chunk
+desktop → relay (binary): [idLen:2B BE][id][raw body bytes]     response body chunk (0+)
 desktop → relay (text):   { t:4, id }                            response end
 ```
 
-Protocol negotiation: desktop sends `Sec-WebSocket-Protocol: oc-tunnel-v2` during WebSocket handshake. Relay checks `ws.protocol` to select V2 or fall back to V1.
+**Backpressure:** if `ws.bufferedAmount` exceeds 2MB, the sender pauses and
+waits for the `drain` event before continuing.
 
-### Backpressure
+### Terminal / PTY sessions (JSON text frames)
 
-V2 includes backpressure control: if `ws.bufferedAmount` exceeds 2MB, the sender pauses and waits for the `drain` event before continuing.
+WebSocket upgrades on `/api/proxy/:envId/...` (terminal/PTY sessions) are
+multiplexed through the tunnel as JSON text frames. This is a separate
+message namespace from the HTTP `t:1`–`t:4` protocol above — the two coexist
+on the same WebSocket connection without conflict.
+
+```
+relay → desktop (text):   { type:'ws-req', id, path, headers }            terminal session start
+desktop → relay (text):   { type:'ws-open', id }                           upstream connected
+relay → desktop (text):   { type:'ws-data', id, data }                     client → desktop (base64)
+desktop → relay (text):   { type:'ws-data', id, data }                     desktop → client (base64)
+either side (text):       { type:'ws-close', id }                          session end
+```
+
+### Protocol negotiation
+
+The desktop tunnel client sends `Sec-WebSocket-Protocol: oc-tunnel-v2` during
+the WebSocket handshake. The relay checks `ws.protocol` to select V2 binary
+frames for HTTP traffic. Terminal/PTY messages always use JSON text frames
+regardless of the negotiated protocol.
+
+### Legacy V1 (deprecated)
+
+V1 used JSON text frames with base64-encoded bodies for HTTP traffic
+(`type:'req'`, `type:'res'`, `type:'chunk'`, `type:'end'`). V1 is retained as
+a fallback for older desktop clients that do not send the `oc-tunnel-v2`
+subprotocol. Current desktop builds always negotiate V2, so V1 code paths are
+inactive in production.
 
 ## Security
 
