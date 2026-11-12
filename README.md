@@ -83,36 +83,112 @@ All configuration is via environment variables:
 
 ### Authentication
 
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/auth/register` | Register a new account |
-| `POST` | `/api/auth/login` | Login and get a session token |
-| `GET` | `/api/auth/me` | Get current user |
-| `POST` | `/api/auth/logout` | Destroy current session |
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/auth/register` | None | Register a new account |
+| `POST` | `/api/auth/login` | None | Login and get a session token |
+| `GET` | `/api/auth/me` | Bearer | Get current user |
+| `POST` | `/api/auth/logout` | Bearer | Destroy current session |
+
+#### Session token
+
+The session token is a 32-byte base64url-encoded random value, returned in the
+`token` field of the login response. It is the Bearer credential for all
+authenticated relay API endpoints:
+
+```
+Authorization: Bearer <token>
+```
+
+**Scope:** The token authorizes access to the user's own account only. Every
+environment-scoped operation checks `env.ownerId === user.id`; a token held by
+user A cannot list, proxy, or tunnel environments registered by user B. Cross-
+account access returns 403.
+
+**Expiry:** Sessions expire after 24 hours of inactivity (configurable via
+`RELAY_SESSION_TTL_MS`). Each authenticated request resets the inactivity timer.
 
 ### Environments
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/environments` | List environments for current user |
-| `POST` | `/api/environments` | Register/update an environment |
-| `PATCH` | `/api/environments/:id` | Update environment (heartbeat) |
-| `POST` | `/api/environments/:id/heartbeat` | Heartbeat + probe |
-| `DELETE` | `/api/environments/:id` | Delete environment |
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/environments` | Bearer | List environments for current user |
+| `POST` | `/api/environments` | Bearer | Register/update an environment |
+| `PATCH` | `/api/environments/:id` | Bearer | Update environment |
+| `POST` | `/api/environments/:id/heartbeat` | Bearer | Heartbeat + probe |
+| `DELETE` | `/api/environments/:id` | Bearer | Delete environment |
 
 ### Proxy
 
-| Method | Path | Description |
-|---|---|---|
-| `*` | `/api/proxy/:envId/:rest*` | Proxy request to environment via tunnel |
-| `GET` | `/global/health` | Health check |
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/proxy/:envId/:rest*` | Bearer or Basic | Proxy HTTP request to environment via tunnel |
+| `HEAD` | `/api/proxy/:envId/:rest*` | Bearer or Basic | Proxy HTTP HEAD request |
+| `POST` | `/api/proxy/:envId/:rest*` | Bearer or Basic | Proxy HTTP POST request |
+| `PUT` | `/api/proxy/:envId/:rest*` | Bearer or Basic | Proxy HTTP PUT request |
+| `PATCH` | `/api/proxy/:envId/:rest*` | Bearer or Basic | Proxy HTTP PATCH request |
+| `DELETE` | `/api/proxy/:envId/:rest*` | Bearer or Basic | Proxy HTTP DELETE request |
+| `GET` | `/global/health` | None | Health check |
+
+`OPTIONS` is intercepted by the relay as a CORS preflight (returns 204) and is
+not forwarded to the upstream.
+
+#### Proxy authentication — credential substitution
+
+The relay is a **credential-translation proxy**. The client authenticates to the
+relay with relay account credentials (Bearer token or Basic Auth with relay
+username/password). The relay then **discards** the client's `Authorization`
+header and **substitutes** it with the environment's own opencode sidecar
+credentials before forwarding through the tunnel:
+
+```
+Client → Relay:     Authorization: Bearer <relay-session-token>
+                    (or Basic base64(<relay-username>:<relay-password>))
+
+Relay → Desktop:    Authorization: Basic base64(<env.username>:<env.password>)
+```
+
+`env.username` defaults to `opencode` and `env.password` is the opencode sidecar
+password, stored during environment registration. The client's original
+credentials never reach the desktop.
 
 ### WebSocket
 
-| Path | Description |
-|---|---|
-| `/api/tunnel/:envId` | Desktop reverse tunnel (outbound, persistent) |
-| `/api/proxy/:envId/...` | Client terminal session (WebSocket upgrade) |
+| Path | Auth | Description |
+|---|---|---|
+| `/api/tunnel/:envId` | Bearer (env owner only) | Desktop reverse tunnel (outbound, persistent) |
+| `/api/proxy/:envId/...` | Bearer or Basic | Client terminal/PTY session (WebSocket upgrade) |
+
+### Passthrough semantics
+
+#### HTTP API
+
+All six methods (GET, HEAD, POST, PUT, PATCH, DELETE) are transparently proxied
+through the reverse tunnel to the desktop's local opencode sidecar. Request
+headers, body, query string, and response status/headers/body are forwarded
+verbatim (with the `Authorization` header substituted as described above).
+`accept-encoding: identity` is forced to prevent upstream compression, ensuring
+streaming responses work correctly.
+
+#### SSE (Server-Sent Events)
+
+SSE streams (`Content-Type: text/event-stream`) are handled by the generic
+streaming pipeline. Response body chunks are written to the HTTP response
+immediately as they arrive from the tunnel — no buffering. In V2 mode, binary
+frames are written directly; in V1 mode, base64-decoded chunks are written. The
+`content-type` header is preserved, and `accept-encoding: identity` prevents
+compression, so token-by-token SSE passthrough works end-to-end.
+
+#### WebSocket / PTY
+
+WebSocket upgrades on `/api/proxy/:envId/...` (including PTY terminal sessions)
+are multiplexed through the reverse tunnel as `ws-req` / `ws-data` / `ws-close`
+messages. The relay does not distinguish terminal sessions from other WebSocket
+upgrades — all are transparently forwarded. Data is bidirectional: client-to-
+desktop and desktop-to-client payloads are relayed in real time.
+
+The desktop side establishes a local WebSocket connection to opencode's
+terminal/PTY endpoint and bridges data bidirectionally through the tunnel.
 
 ## V2 binary frame protocol
 
