@@ -1,0 +1,11 @@
+[Unit]
+Description=Renew the Let's Encrypt IP certificate (6-day shortlived profile)
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/oc-relay/renew-ip-cert.sh
+
+# IP certificates live only 6 days, so renew twice a day.
+# Each run does a dry-run first and only touches the live cert if that passes.

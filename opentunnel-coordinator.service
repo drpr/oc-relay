@@ -1,0 +1,39 @@
+[Unit]
+Description=OpenTunnel coordinator (self-hosted blind TLS tunnel server)
+After=network-online.target mariadb.service
+Wants=network-online.target
+Requires=mariadb.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/oc-relay
+ExecStart=/usr/local/bin/opentunnel-server \
+  --domain ot.example.internal \
+  --tls-listen 0.0.0.0:8443 \
+  --http-listen 0.0.0.0:8080 \
+  --http-mode redirect \
+  --database-url mysql://otunnel:ot_l3_db_pw_2026@127.0.0.1:3306/opentunnel \
+  --issuer local \
+  --local-ca-file /opt/oc-relay/data/coordinator-ca.pem \
+  --machine-id hk-relay-01 \
+  --region hk
+Restart=always
+RestartSec=10
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ot-coordinator
+
+# 加固：只允许写自己的数据目录与数据库 socket
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/oc-relay/data
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

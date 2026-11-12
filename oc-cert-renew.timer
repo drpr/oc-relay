@@ -1,0 +1,13 @@
+[Unit]
+Description=Twice-daily renewal check for the Let's Encrypt IP certificate
+
+[Timer]
+# Twice a day: the certificate is valid for only ~6 days, so a 12-hour
+# cadence leaves plenty of margin for a failed run to be retried.
+OnCalendar=*-*-* 03,15:00:00
+# Spread the load and catch up after downtime.
+RandomizedDelaySec=30m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.oc-connector</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>/Users/alex/Documents/trae_projects/research/relay/connector.js</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/alex/Documents/trae_projects/research/relay</string>
+
+  <!-- The coordinator serves certificates signed by its own CA.
+       Node's NODE_EXTRA_CA_CERTS is what makes the client trust it. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NODE_EXTRA_CA_CERTS</key>
+    <string>/Users/alex/.config/oc-connector/coordinator-ca.pem</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <!-- The connector exits when the tunnel drops; launchd restarts it.
+       A 20s throttle avoids a tight restart loop if the coordinator is down. -->
+  <key>ThrottleInterval</key>
+  <integer>20</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/alex/.local/state/oc-connector/connector.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/alex/.local/state/oc-connector/connector.err.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
