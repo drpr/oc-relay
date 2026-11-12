@@ -236,14 +236,6 @@ the WebSocket handshake. The relay checks `ws.protocol` to select V2 binary
 frames for HTTP traffic. Terminal/PTY messages always use JSON text frames
 regardless of the negotiated protocol.
 
-### Legacy V1 (deprecated)
-
-V1 used JSON text frames with base64-encoded bodies for HTTP traffic
-(`type:'req'`, `type:'res'`, `type:'chunk'`, `type:'end'`). V1 is retained as
-a fallback for older desktop clients that do not send the `oc-tunnel-v2`
-subprotocol. Current desktop builds always negotiate V2, so V1 code paths are
-inactive in production.
-
 ## Security
 
 - Passwords hashed with scrypt (N=16384, r=8, p=1) + per-user random salt
